@@ -7,135 +7,139 @@
 */
 
 'use strict';
-const { ObjectID } = require('mongodb');
 
-const filterer = (arr, obj) => {
-    arr.filter(a => !!a[1]).map(a => obj[a[0]] = a[1])
-}
+const Book = require('../model/book.js')
 
-module.exports = function (app, myDataBase) {
+module.exports = function (app) {
 
-    app.route('/api/books')
-        .get(function (req, res){
-        //response will be array of book objects
-        //json res format: [{"_id": bookid, "title": book_title, "commentcount": num_of_comments },...]
-            const collection = myDataBase.collection("books");
+  app.route('/api/books')
+    .get(async (req, res) => {
+      //response will be array of book objects
+      //json res format: [{"_id": bookid, "title": book_title, "commentcount": num_of_comments },...]
+      // console.log(req.body)
 
-            collection.find({}).toArray((err, data) => {
-                if(err) {
-                    return res.json({"error": "Server error, please try later"})
-                } else if(!!data) {
-                    return res.status(200).json(data);
-                }
-            });
+      try {
+        const allBooks = await Book.find({})
 
-        })
-        
-        .post(function (req, res){
-        let title = req.body.title;
-        //response will contain new book object including atleast _id and title
+        return res.json(allBooks)
+      } catch(e) {
+        return res.json(e)
+      }
+
+    })
+    
+    .post(async (req, res) => {
+      let title = req.body.title;
+      //response will contain new book object including atleast _id and title
+      
+      try {
         if(!title) {
-            return res.send("missing required field title");
-        } else {
-            const collection = myDataBase.collection("books");
-
-            collection.insertOne({
-                "title":title,
-                "commentcount":0,
-                "__v":1,
-                "comments":[]
-            }, (err, data) => {
-                if(err) {
-                    return res.json({"error": "Server error, please try later"})
-                } else if(data) {
-                    return res.status(200).json(data.ops[0]);
-                }
-            });
+          return res.json('missing required field title')
         }
+
+        const bookToSave = new Book({
+          title: title,
+          comments: []
         })
-        
-        .delete(function(req, res){
-        //if successful response will be 'complete delete successful'
-            const collection = myDataBase.collection("books");
-            collection.remove({}, (err, data) => {
-                if(err) {
-                    return res.status(404).json({error: "Cannot remove books"});
-                } else if(data) {
-                    return res.status(200).send("complete delete successful");
-                }
-            })
-        });
+
+        await bookToSave.save()
+        return res.json({
+          title: bookToSave.title,
+          _id: bookToSave._id
+        })
+      } catch(e) {
+        return res.json(e)
+      }
+    })
+    
+    .delete(async (req, res) => {
+      //if successful response will be 'complete delete successful'
+
+        try {
+       await Book.deleteMany()
+
+        return res.json('complete delete successful')
+      } catch(e) {
+        return res.json(e)
+      }
+    });
 
 
 
-    app.route('/api/books/:id')
-        .get(function (req, res){
-        let bookId = req.params.id;
-        //json res format: {"_id": bookid, "title": book_title, "comments": [comment,comment,...]}
-        const collection = myDataBase.collection("books");
-        if(!ObjectID.isValid(bookId)) {
-            return res.status(404).send("Invalid book Id");
+  app.route('/api/books/:id')
+    .get(async (req, res) => {
+      let bookid = req.params.id;
+      //json res format: {"_id": bookid, "title": book_title, "comments": [comment,comment,...]}
+
+      try {
+        const bookToBeFound = await Book.findById(bookid)
+
+        if(!bookToBeFound) {
+          return res.json('no book exists')
         }
-        collection.find({"_id": new ObjectID(bookId)}).toArray((err, data) => {
-            if(!!err) {
-                return res.status(404).send("no book exists");
-            } else if (!!data) {
-                return res.status(200).json(data);
-            }
-        })
-        })
-        
-        .post(function(req, res){
-        let bookId = req.params.id;
-        let comment = req.body.comment;
-        //json res format same as .get
 
-        if(!ObjectID.isValid(bookId)) {
-            return res.status(404).send("Invalid book Id");
-        }
+        return res.json({
+            title: bookToBeFound.title,
+            _id: bookToBeFound._id,
+            comments: bookToBeFound.comments
+        })
+      } catch(e) {
+        return res.json('no book exists')
+      }
+
+    })
+    
+    .post(async (req, res) => {
+      let bookid = req.params.id;
+      let comment = req.body.comment;
+      //json res format same as .get
+
+      try {
         if(!comment) {
-            return res.status(404).send("missing required field comment");
+          return res.json('missing required field comment')
+        }    
+
+        const bookToBeUpdated = await Book.findByIdAndUpdate(
+          bookid,
+          {$push: {comments: {comment}}},
+          {new: true}
+        )
+        
+        if(!bookToBeUpdated) {
+          return res.json('no book exists')
         }
-        const collection = myDataBase.collection("books");
-        collection.findOneAndUpdate({"_id": new ObjectID(bookId)}, {
-            $push: {
-                comments: comment
-            },
-            $inc: {
-                commentcount: 1
-            }
-        }, {returnNewDocument: true}, (err, data) => {
-            if(!!err) {
-                return res.status(404).send("no book exists");
-            } else if (!!data) {
-                return res.status(200).json(data.value);
-            }
-        })
+
+        let commentToBeSent = [];
+        bookToBeUpdated.comments.forEach(commentToBeSaved => {
+
+           commentToBeSent.push(commentToBeSaved.comment)
         })
         
-        .delete(function(req, res){
-        let bookId = req.params.id;
-        //if successful response will be 'delete successful'
-        if(!ObjectID.isValid(bookId)) {
-            return res.status(404).send("Invalid book Id");
-        }
-        const collection = myDataBase.collection("books");
-
-        collection.deleteOne({_id: new ObjectID(bookId)}, (err, data) => {
-            if(err) {
-                return res.status(404).send("no book exists")
-            } else if (data) {
-                return res.status(200).send("delete successful")
-            }
+        return res.json({
+          title: bookToBeUpdated.title,
+          _id: bookToBeUpdated._id,
+          comments: commentToBeSent,
+          commentcount: bookToBeUpdated.comments.length
         })
-        });
+      } catch (e) {
+        return res.json('no book exists')
+      }
+    })
+    
+    .delete(async (req, res) => {
+      let bookid = req.params.id;
+      //if successful response will be 'delete successful'
+      try {
+        const bookToBeDeleted = await Book.findByIdAndDelete(bookid)
+
+        if(!bookToBeDeleted) {
+          return res.json('no book exists')
+        }
+
+        return res.json('delete successful')
+      } catch(e) {
+        return res.json('no book exists')
+      }
+    });
   
 };
-const SampleBook = {
-    "_id":"6020bf081ddf7906daee8381",
-    "title":"stars in our dream",
-    "commentcount":2,
-    "__v":2
-};
-
-const obj = {"title":"TEST WWW","commentcount":0,"__v":1,"comments":[],"_id":"60212eb78290960249a6d6af"}
